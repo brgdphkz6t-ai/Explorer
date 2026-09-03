@@ -1,323 +1,221 @@
-/**
- * 3D Virtual Museum - Main Application with Lazy Loading
- * 
- * Creates an interactive 3D gallery where users can walk around
- * in first-person view and view artwork on the walls.
- * 
- * Features:
- * - First-person navigation with PointerLockControls
- * - WASD/Arrow keys for movement
- * - Mouse look around
- * - Dynamic image loading from Netlify Functions
- * - LAZY LOADING: Rooms generated as you walk
- * - Framed artwork display on gallery walls
- */
+// ============================================================================
+// 3D VIRTUAL MUSEUM - Three.js Implementation with Lazy Loading
+// Features: First-person controls, multi-room gallery, CORS-bypassing image proxy
+// ============================================================================
 
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 
 // ============================================================================
-// GLOBAL VARIABLES
+// CONFIGURATION
 // ============================================================================
-
-let camera, scene, renderer, controls;
-let moveForward = false;
-let moveBackward = false;
-let moveLeft = false;
-let moveRight = false;
-let prevTime = performance.now();
-const velocity = new THREE.Vector3();
-const direction = new THREE.Vector3();
-
-// Gallery configuration
+const IMAGES_PER_ROOM = 6;
+const ROOM_DEPTH = 10;
 const GALLERY_WIDTH = 12;
 const GALLERY_HEIGHT = 5;
-const ROOM_DEPTH = 10;
-const IMAGES_PER_ROOM = 6;
+const MOVE_SPEED = 80.0;
+const MAX_IMAGES = 60; // Cap to prevent browser crashes
 
-// Lazy loading state
+// ============================================================================
+// GLOBAL VARIABLES
+// ============================================================================
+let camera, scene, renderer, controls;
+let moveForward = false, moveBackward = false;
+let moveLeft = false, moveRight = false;
+let prevTime = performance.now();
 let allImages = [];
-let roomsCreated = 0;
+let roomsGenerated = 0;
 let isGenerating = false;
-let isLoadingComplete = false;
 
 // DOM Elements
-const loadingScreen = document.getElementById('loading-screen');
-const loadingProgress = document.getElementById('loading-progress');
-const clickToStart = document.getElementById('click-to-start');
+const blocker = document.getElementById('blocker');
+const instructions = document.getElementById('instructions');
+const loadingScreen = document.getElementById('loadingScreen');
+const loadingProgress = document.getElementById('loadingProgress');
 
 // ============================================================================
 // INITIALIZATION
 // ============================================================================
-
 init();
 animate();
 
-/**
- * Initialize the 3D scene, camera, renderer, and controls
- */
 async function init() {
-  // Create scene
+  // Scene setup
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x1a1a1a);
   scene.fog = new THREE.Fog(0x1a1a1a, 0, 40);
 
-  // Create camera
-  camera = new THREE.PerspectiveCamera(
-    75,
-    window.innerWidth / window.innerHeight,
-    0.1,
-    1000
-  );
-  camera.position.set(0, 1.7, 5);
+  // Camera
+  camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.y = 1.6;
 
-  // Create renderer
+  // Renderer
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   document.body.appendChild(renderer.domElement);
 
-  // Setup controls
-  setupControls();
-
-  // Setup lighting
-  createLighting();
-
-  // Load images and start lazy generation
-  await loadImages();
-
-  // Handle window resize
-  window.addEventListener('resize', onWindowResize);
-}
-
-/**
- * Setup pointer lock controls and event listeners
- */
-function setupControls() {
+  // Controls
   controls = new PointerLockControls(camera, document.body);
 
-  // Click to start overlay
-  if (clickToStart) {
-    clickToStart.addEventListener('click', () => {
-      controls.lock();
-    });
-  } else {
-    document.addEventListener('click', () => {
-      controls.lock();
-    });
-  }
+  // Click to start
+  document.addEventListener('click', () => {
+    controls.lock();
+  });
 
-  // Lock state changes
   controls.addEventListener('lock', () => {
-    if (loadingScreen) loadingScreen.classList.add('hidden');
-    if (clickToStart) clickToStart.classList.add('hidden');
+    if (blocker) blocker.style.display = 'none';
+    if (instructions) instructions.style.display = 'none';
   });
 
   controls.addEventListener('unlock', () => {
-    // Optionally show a pause menu here
+    if (blocker) blocker.style.display = 'flex';
+    if (instructions) instructions.style.display = 'flex';
   });
 
   // Keyboard controls
   const onKeyDown = (event) => {
     switch (event.code) {
-      case 'ArrowUp':
-      case 'KeyW':
-        moveForward = true;
-        break;
-      case 'ArrowLeft':
-      case 'KeyA':
-        moveLeft = true;
-        break;
-      case 'ArrowDown':
-      case 'KeyS':
-        moveBackward = true;
-        break;
-      case 'ArrowRight':
-      case 'KeyD':
-        moveRight = true;
-        break;
+      case 'ArrowUp': case 'KeyW': moveForward = true; break;
+      case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
+      case 'ArrowDown': case 'KeyS': moveBackward = true; break;
+      case 'ArrowRight': case 'KeyD': moveRight = true; break;
     }
   };
 
   const onKeyUp = (event) => {
     switch (event.code) {
-      case 'ArrowUp':
-      case 'KeyW':
-        moveForward = false;
-        break;
-      case 'ArrowLeft':
-      case 'KeyA':
-        moveLeft = false;
-        break;
-      case 'ArrowDown':
-      case 'KeyS':
-        moveBackward = false;
-        break;
-      case 'ArrowRight':
-      case 'KeyD':
-        moveRight = false;
-        break;
+      case 'ArrowUp': case 'KeyW': moveForward = false; break;
+      case 'ArrowLeft': case 'KeyA': moveLeft = false; break;
+      case 'ArrowDown': case 'KeyS': moveBackward = false; break;
+      case 'ArrowRight': case 'KeyD': moveRight = false; break;
     }
   };
 
   document.addEventListener('keydown', onKeyDown);
   document.addEventListener('keyup', onKeyUp);
-}
 
-// ============================================================================
-// LIGHTING
-// ============================================================================
-
-/**
- * Create ambient and directional lighting for the gallery
- */
-function createLighting() {
-  // Ambient light
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+  // Initial room lighting
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
   scene.add(ambientLight);
 
-  // Main directional light
-  const mainLight = new THREE.DirectionalLight(0xffffff, 0.6);
-  mainLight.position.set(0, GALLERY_HEIGHT - 1, 0);
-  mainLight.castShadow = true;
-  scene.add(mainLight);
+  // Load images and start generating rooms
+  await loadImages();
 }
 
 // ============================================================================
-// IMAGE LOADING AND LAZY ROOM GENERATION
+// IMAGE LOADING
 // ============================================================================
-
-/**
- * Load images from the Netlify Function
- */
 async function loadImages() {
+  if (loadingProgress) loadingProgress.textContent = 'Fetching image URLs...';
+  
   try {
-    if (loadingProgress) loadingProgress.textContent = 'Fetching images from server...';
-    
     const response = await fetch('/.netlify/functions/get-images');
-    
-    if (!response.ok) {
-      throw new Error(`Server responded with ${response.status}`);
-    }
-    
     const data = await response.json();
-    allImages = data.images || [];
     
-    // Cap at 100 images for performance
-    if (allImages.length > 100) {
-      allImages = allImages.slice(0, 100);
+    if (data.success && data.images.length > 0) {
+      allImages = data.images.slice(0, MAX_IMAGES);
+      console.log(`Loaded ${allImages.length} images`);
+      
+      // Start generating rooms
+      generateNextRoom();
+    } else {
+      throw new Error('No images returned');
     }
-    
-    if (loadingProgress) loadingProgress.textContent = `Found ${allImages.length} images. Generating gallery...`;
-    
-    if (allImages.length === 0) {
-      throw new Error('No images available');
-    }
-    
-    // Start lazy loading - generate first 2 rooms immediately
-    await generateNextRoom();
-    await generateNextRoom();
-    
-    // Update UI
-    setTimeout(() => {
-      if (loadingScreen) loadingScreen.style.opacity = '0.5';
-      if (loadingProgress) loadingProgress.textContent = 'Walk forward to generate more rooms';
-    }, 1000);
-    
-    isLoadingComplete = true;
-    
   } catch (error) {
-    console.error('Error loading images:', error);
-    if (loadingProgress) loadingProgress.textContent = 'Failed to load images. Using demo gallery...';
-    
-    // Use fallback images
-    allImages = [
-      'https://picsum.photos/seed/art1/800/600',
-      'https://picsum.photos/seed/art2/800/600',
-      'https://picsum.photos/seed/art3/800/600',
-      'https://picsum.photos/seed/art4/800/600',
-      'https://picsum.photos/seed/art5/800/600',
-      'https://picsum.photos/seed/art6/800/600'
-    ];
-    
-    await generateNextRoom();
-    if (loadingScreen) loadingScreen.classList.add('hidden');
-    if (clickToStart) clickToStart.classList.add('hidden');
-    isLoadingComplete = true;
+    console.warn('Scraping failed, using fallback images:', error);
+    // Fallback placeholder images
+    allImages = Array.from({ length: 12 }, (_, i) => 
+      `https://picsum.photos/seed/${i}/800/600`
+    );
+    generateNextRoom();
   }
 }
 
-/**
- * Generate the next room segment (lazy loading)
- */
+// ============================================================================
+// ROOM GENERATION (Lazy Loading)
+// ============================================================================
 async function generateNextRoom() {
-  if (isGenerating || roomsCreated * IMAGES_PER_ROOM >= allImages.length) {
-    return;
-  }
-
+  if (isGenerating) return;
   isGenerating = true;
-  
-  const startIdx = roomsCreated * IMAGES_PER_ROOM;
-  const roomImages = allImages.slice(startIdx, startIdx + IMAGES_PER_ROOM);
-  
+
+  const startIndex = roomsGenerated * IMAGES_PER_ROOM;
+  const roomImages = allImages.slice(startIndex, startIndex + IMAGES_PER_ROOM);
+
   if (roomImages.length === 0) {
+    if (loadingScreen) loadingScreen.style.display = 'none';
     isGenerating = false;
     return;
   }
 
-  const zPosition = -(roomsCreated * ROOM_DEPTH);
+  if (loadingProgress && roomsGenerated === 0) {
+    loadingProgress.textContent = `Generating room ${roomsGenerated + 1}... Walk forward for more!`;
+  }
+
+  const zOffset = -roomsGenerated * ROOM_DEPTH;
+  await createRoomSegment(roomImages, zOffset);
+
+  roomsGenerated++;
   
-  await createRoomSegment(zPosition, roomImages);
+  if (loadingScreen && roomsGenerated === 1) {
+    loadingScreen.style.display = 'none';
+  }
+
+  const totalRooms = Math.ceil(allImages.length / IMAGES_PER_ROOM);
+  console.log(`Generated ${roomsGenerated}/${totalRooms} rooms`);
   
-  roomsCreated++;
   isGenerating = false;
 
-  // Update loading text
-  const totalRooms = Math.ceil(allImages.length / IMAGES_PER_ROOM);
-  if (roomsCreated >= totalRooms) {
-    if (loadingScreen) loadingScreen.classList.add('hidden');
-    if (clickToStart) clickToStart.classList.add('hidden');
-  } else {
-    if (loadingProgress) loadingProgress.textContent = `Generated ${roomsCreated}/${totalRooms} rooms. Walk forward for more.`;
+  // Pre-generate next room if more images available
+  if (startIndex + IMAGES_PER_ROOM < allImages.length) {
+    setTimeout(() => generateNextRoom(), 500);
   }
 }
 
-/**
- * Create a single room segment with artworks
- */
-async function createRoomSegment(zOffset, images) {
-  const wallMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0xeeeeee, 
-    roughness: 0.5 
-  });
-
+async function createRoomSegment(images, zOffset) {
   // Floor
   const floorGeo = new THREE.PlaneGeometry(GALLERY_WIDTH, ROOM_DEPTH);
-  const floorMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
+  const floorMat = new THREE.MeshStandardMaterial({ 
+    color: 0x2a2a2a, roughness: 0.8, metalness: 0.2 
+  });
   const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.rotation.x = -Math.PI / 2;
-  floor.position.set(0, 0, zOffset);
+  floor.position.z = zOffset - ROOM_DEPTH / 2;
+  floor.receiveShadow = true;
   scene.add(floor);
 
   // Ceiling
-  const ceilGeo = new THREE.PlaneGeometry(GALLERY_WIDTH, ROOM_DEPTH);
-  const ceilMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
-  const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
+  const ceilingGeo = new THREE.PlaneGeometry(GALLERY_WIDTH, ROOM_DEPTH);
+  const ceilingMat = new THREE.MeshStandardMaterial({ 
+    color: 0x1a1a1a, roughness: 0.9 
+  });
+  const ceiling = new THREE.Mesh(ceilingGeo, ceilingMat);
   ceiling.rotation.x = Math.PI / 2;
-  ceiling.position.set(0, GALLERY_HEIGHT, zOffset);
+  ceiling.position.y = GALLERY_HEIGHT;
+  ceiling.position.z = zOffset - ROOM_DEPTH / 2;
+  ceiling.receiveShadow = true;
   scene.add(ceiling);
 
-  // Left Wall
-  const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_DEPTH, GALLERY_HEIGHT), wallMaterial);
+  // Left wall
+  const leftWall = new THREE.Mesh(
+    new THREE.PlaneGeometry(ROOM_DEPTH, GALLERY_HEIGHT),
+    new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.9 })
+  );
   leftWall.rotation.y = Math.PI / 2;
-  leftWall.position.set(-GALLERY_WIDTH / 2, GALLERY_HEIGHT / 2, zOffset);
+  leftWall.position.set(-GALLERY_WIDTH / 2, GALLERY_HEIGHT / 2, zOffset - ROOM_DEPTH / 2);
+  leftWall.receiveShadow = true;
   scene.add(leftWall);
 
-  // Right Wall
-  const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_DEPTH, GALLERY_HEIGHT), wallMaterial);
+  // Right wall
+  const rightWall = new THREE.Mesh(
+    new THREE.PlaneGeometry(ROOM_DEPTH, GALLERY_HEIGHT),
+    new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.9 })
+  );
   rightWall.rotation.y = -Math.PI / 2;
-  rightWall.position.set(GALLERY_WIDTH / 2, GALLERY_HEIGHT / 2, zOffset);
+  rightWall.position.set(GALLERY_WIDTH / 2, GALLERY_HEIGHT / 2, zOffset - ROOM_DEPTH / 2);
+  rightWall.receiveShadow = true;
   scene.add(rightWall);
 
   // Place images on walls
@@ -339,58 +237,82 @@ async function createRoomSegment(zOffset, images) {
 }
 
 /**
- * Create a single framed picture with spotlight
+ * Create a single framed picture with spotlight (async to handle CORS via proxy)
  */
-function createFramedPicture(imageUrl, x, y, z, rotationY) {
-  return new Promise((resolve) => {
-    const loader = new THREE.TextureLoader();
-    loader.load(
-      imageUrl,
-      (texture) => {
-        const aspect = texture.image.width / texture.image.height;
-        const height = 2.5;
-        const width = height * aspect;
+async function createFramedPicture(imageUrl, x, y, z, rotationY) {
+  let texture;
+  
+  try {
+    // Fetch image via Netlify Function proxy to bypass CORS
+    const proxyUrl = `/.netlify/functions/proxy-image?url=${encodeURIComponent(imageUrl)}`;
+    const response = await fetch(proxyUrl);
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (data.base64) {
+        texture = new THREE.TextureLoader().load(data.base64);
+      }
+    }
+    
+    // Fallback if proxy fails
+    if (!texture) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = `hsl(${Math.random() * 360}, 70%, 50%)`;
+      ctx.fillRect(0, 0, 512, 512);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 36px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Art', 256, 256);
+      texture = new THREE.TextureLoader().load(canvas.toDataURL());
+    }
+    
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const aspect = texture.image?.width / texture.image?.height || 1;
+    const height = 2.5;
+    const width = height * aspect;
 
-        // Picture Mesh
-        const geometry = new THREE.PlaneGeometry(width, height);
-        const material = new THREE.MeshBasicMaterial({ map: texture });
-        const mesh = new THREE.Mesh(geometry, material);
-        
-        // Frame
-        const frameGeo = new THREE.BoxGeometry(width + 0.15, height + 0.15, 0.05);
-        const frameMat = new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.7 });
-        const frame = new THREE.Mesh(frameGeo, frameMat);
-        frame.position.z = -0.03;
-        mesh.add(frame);
+    // Picture Mesh
+    const geometry = new THREE.PlaneGeometry(width, height);
+    const material = new THREE.MeshBasicMaterial({ map: texture });
+    const mesh = new THREE.Mesh(geometry, material);
 
-        // Positioning
-        mesh.position.set(x, y, z);
-        mesh.rotation.y = rotationY;
+    // Frame
+    const frameGeo = new THREE.BoxGeometry(width + 0.15, height + 0.15, 0.05);
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.7 });
+    const frame = new THREE.Mesh(frameGeo, frameMat);
+    frame.position.z = -0.03;
+    mesh.add(frame);
 
-        // Spotlight
-        const spotLight = new THREE.SpotLight(0xffaa00, 2);
-        spotLight.position.set(x, y + 2, z + 1);
-        spotLight.target = mesh;
-        spotLight.angle = Math.PI / 6;
-        spotLight.penumbra = 0.5;
-        spotLight.castShadow = true;
-        
-        scene.add(mesh);
-        scene.add(spotLight);
-        scene.add(spotLight.target);
-        
-        resolve(mesh);
-      },
-      undefined,
-      () => resolve(null)
-    );
-  });
+    // Positioning
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = rotationY;
+
+    // Spotlight
+    const spotLight = new THREE.SpotLight(0xffaa00, 2);
+    spotLight.position.set(x, y + 2, z + 1);
+    spotLight.target = mesh;
+    spotLight.angle = Math.PI / 6;
+    spotLight.penumbra = 0.5;
+    spotLight.castShadow = true;
+
+    scene.add(mesh);
+    scene.add(spotLight);
+    scene.add(spotLight.target);
+
+    return mesh;
+  } catch (err) {
+    console.warn('Error creating picture:', err);
+    return null;
+  }
 }
 
 // ============================================================================
 // ANIMATION LOOP
 // ============================================================================
-
 function animate() {
   requestAnimationFrame(animate);
 
@@ -398,26 +320,20 @@ function animate() {
   const delta = (time - prevTime) / 1000;
 
   if (controls.isLocked) {
-    // Movement Logic
-    velocity.x -= velocity.x * 10.0 * delta;
-    velocity.z -= velocity.z * 10.0 * delta;
+    // Movement logic
+    const actualSpeed = MOVE_SPEED * delta;
+    
+    if (moveForward) controls.moveForward(actualSpeed);
+    if (moveBackward) controls.moveForward(-actualSpeed);
+    if (moveRight) controls.moveRight(actualSpeed);
+    if (moveLeft) controls.moveRight(-actualSpeed);
 
-    direction.z = Number(moveForward) - Number(moveBackward);
-    direction.x = Number(moveRight) - Number(moveLeft);
-    direction.normalize();
-
-    if (moveForward || moveBackward) velocity.z -= direction.z * 100.0 * delta;
-    if (moveLeft || moveRight) velocity.x -= direction.x * 100.0 * delta;
-
-    controls.moveRight(-velocity.x * delta);
-    controls.moveForward(-velocity.z * delta);
-
-    // Lazy Loading Trigger: If user walks near the end of generated rooms
-    if (isLoadingComplete) {
-      const triggerZ = -(roomsCreated * ROOM_DEPTH) + 15;
-      if (camera.position.z < triggerZ) {
-        generateNextRoom();
-      }
+    // Auto-generate next room when approaching end
+    const playerZ = camera.position.z;
+    const lastRoomEnd = -(roomsGenerated * ROOM_DEPTH) + 5;
+    
+    if (playerZ < lastRoomEnd && !isGenerating) {
+      generateNextRoom();
     }
   }
 
@@ -425,12 +341,9 @@ function animate() {
   renderer.render(scene, camera);
 }
 
-// ============================================================================
-// EVENT HANDLERS
-// ============================================================================
-
-function onWindowResize() {
+// Handle window resize
+window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-}
+});
