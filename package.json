@@ -1,10 +1,12 @@
 {
-  "name": "3d-virtual-museum",
-  "version": "1.0.0",
-  "description": "3D Virtual Museum with Netlify Functions",
+  "name": "3d-virtual-museum-v2",
+  "version": "2.0.0",
+  "description": "Enhanced 3D Virtual Museum with improved graphics, lighting, and performance - Netlify Functions",
   "type": "module",
   "scripts": {
-    "dev": "netlify dev"
+    "dev": "netlify dev",
+    "build": "echo 'No build step required - using CDN modules'",
+    "start": "netlify dev"
   },
   "dependencies": {
     "cheerio": "^1.0.0-rc.12"
@@ -14,5 +16,15 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "keywords": [
+    "threejs",
+    "3d",
+    "virtual-museum",
+    "gallery",
+    "webgl",
+    "netlify"
+  ],
+  "author": "",
+  "license": "MIT"
 }
