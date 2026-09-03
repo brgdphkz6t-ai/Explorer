@@ -115,21 +115,25 @@ async function loadImages() {
     const response = await fetch('/.netlify/functions/get-images');
     const data = await response.json();
     
-    if (data.success && data.images.length > 0) {
-      allImages = data.images.slice(0, MAX_IMAGES);
-      console.log(`Loaded ${allImages.length} images`);
+    // Handle both success and direct image array responses
+    const images = data.images || data.success && data.images ? data.images : [];
+    
+    if (images.length > 0) {
+      allImages = images.slice(0, MAX_IMAGES);
+      console.log(`Loaded ${allImages.length} images from ${data.source || 'server'}`);
       
-      // Start generating rooms
+      // Start generating rooms immediately
       generateNextRoom();
     } else {
-      throw new Error('No images returned');
+      throw new Error('No images returned from server');
     }
   } catch (error) {
-    console.warn('Scraping failed, using fallback images:', error);
-    // Fallback placeholder images
+    console.warn('Scraping failed, using fallback images:', error.message);
+    // Fallback placeholder images - guaranteed to work
     allImages = Array.from({ length: 12 }, (_, i) => 
-      `https://picsum.photos/seed/${i}/800/600`
+      `https://picsum.photos/seed/museum${i}/800/600`
     );
+    console.log(`Using ${allImages.length} fallback images`);
     generateNextRoom();
   }
 }

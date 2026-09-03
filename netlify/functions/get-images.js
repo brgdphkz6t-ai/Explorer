@@ -62,15 +62,11 @@ export async function handler(event, context) {
     const images = [];
     
     // Strategy 1: Look for album/video thumbnails in the explore grid
-    $('.album-img img, .video-thumb img, .thumb img, .media-grid img').each((i, elem) => {
+    $('.album-img img, .video-thumb img, .thumb img, .media-grid img, .group-albums img').each((i, elem) => {
       let src = $(elem).attr('data-src') || $(elem).attr('src');
       if (src) {
         let fullUrl = normalizeUrl(src);
-        
-        // Filter for actual content images (exclude UI elements)
-        if (isValidContentImage(fullUrl)) {
-          images.push(fullUrl);
-        }
+        images.push(fullUrl);
       }
     });
     
@@ -79,26 +75,33 @@ export async function handler(event, context) {
       let src = $(elem).attr('data-src');
       if (src) {
         let fullUrl = normalizeUrl(src);
-        
-        // Filter for actual content images
-        if (isValidContentImage(fullUrl) && !images.includes(fullUrl)) {
+        if (!images.includes(fullUrl)) {
           images.push(fullUrl);
         }
       }
     });
     
-    // Strategy 3: Look for regular img src attributes
+    // Strategy 3: Look for regular img src attributes - grab EVERYTHING from erome CDN
     $('img[src]').each((i, elem) => {
       let src = $(elem).attr('src');
       if (src) {
         let fullUrl = normalizeUrl(src);
-        
-        // Filter for actual content images
-        if (isValidContentImage(fullUrl) && !images.includes(fullUrl)) {
+        if (fullUrl.includes('erome.com') && !images.includes(fullUrl)) {
           images.push(fullUrl);
         }
       }
     });
+    
+    // Strategy 4: Regex scrape the entire HTML for erome image URLs (nuclear option)
+    const regex = /https?:\/\/(?:s\d+\.)?erome\.com\/[^\s"'<>]+\.(?:jpg|jpeg|png|gif|webp)/gi;
+    const matches = html.match(regex);
+    if (matches) {
+      matches.forEach(img => {
+        if (!images.includes(img)) {
+          images.push(img);
+        }
+      });
+    }
 
     // Remove duplicates while preserving order
     const uniqueImages = [...new Set(images.filter(url => url && url.length > 10))];
