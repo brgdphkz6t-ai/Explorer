@@ -22,8 +22,8 @@ import { PointerLockControls } from 'three/addons/controls/PointerLockControls.j
 let camera, scene, renderer, controls;
 let moveForward = false;
 let moveBackward = false;
-moveLeft = false;
-moveRight = false;
+let moveLeft = false;
+let moveRight = false;
 let prevTime = performance.now();
 const velocity = new THREE.Vector3();
 const direction = new THREE.Vector3();
