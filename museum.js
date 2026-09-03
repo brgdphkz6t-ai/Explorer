@@ -43,7 +43,8 @@ let isLoadingComplete = false;
 
 // DOM Elements
 const loadingScreen = document.getElementById('loading-screen');
-const loadingText = document.getElementById('loading-text');
+const loadingProgress = document.getElementById('loading-progress');
+const clickToStart = document.getElementById('click-to-start');
 
 // ============================================================================
 // INITIALIZATION
@@ -96,14 +97,21 @@ async function init() {
 function setupControls() {
   controls = new PointerLockControls(camera, document.body);
 
-  // Click anywhere on document to start
-  document.addEventListener('click', () => {
-    controls.lock();
-  });
+  // Click to start overlay
+  if (clickToStart) {
+    clickToStart.addEventListener('click', () => {
+      controls.lock();
+    });
+  } else {
+    document.addEventListener('click', () => {
+      controls.lock();
+    });
+  }
 
   // Lock state changes
   controls.addEventListener('lock', () => {
-    if (loadingScreen) loadingScreen.style.display = 'none';
+    if (loadingScreen) loadingScreen.classList.add('hidden');
+    if (clickToStart) clickToStart.classList.add('hidden');
   });
 
   controls.addEventListener('unlock', () => {
@@ -185,7 +193,7 @@ function createLighting() {
  */
 async function loadImages() {
   try {
-    loadingText.textContent = 'Fetching images from server...';
+    if (loadingProgress) loadingProgress.textContent = 'Fetching images from server...';
     
     const response = await fetch('/.netlify/functions/get-images');
     
@@ -201,7 +209,7 @@ async function loadImages() {
       allImages = allImages.slice(0, 100);
     }
     
-    loadingText.textContent = `Found ${allImages.length} images. Generating gallery...`;
+    if (loadingProgress) loadingProgress.textContent = `Found ${allImages.length} images. Generating gallery...`;
     
     if (allImages.length === 0) {
       throw new Error('No images available');
@@ -213,15 +221,15 @@ async function loadImages() {
     
     // Update UI
     setTimeout(() => {
-      loadingScreen.style.opacity = '0.5';
-      loadingText.textContent = 'Walk forward to generate more rooms';
+      if (loadingScreen) loadingScreen.style.opacity = '0.5';
+      if (loadingProgress) loadingProgress.textContent = 'Walk forward to generate more rooms';
     }, 1000);
     
     isLoadingComplete = true;
     
   } catch (error) {
     console.error('Error loading images:', error);
-    loadingText.textContent = 'Failed to load images. Using demo gallery...';
+    if (loadingProgress) loadingProgress.textContent = 'Failed to load images. Using demo gallery...';
     
     // Use fallback images
     allImages = [
@@ -234,7 +242,8 @@ async function loadImages() {
     ];
     
     await generateNextRoom();
-    loadingScreen.style.display = 'none';
+    if (loadingScreen) loadingScreen.classList.add('hidden');
+    if (clickToStart) clickToStart.classList.add('hidden');
     isLoadingComplete = true;
   }
 }
@@ -267,9 +276,10 @@ async function generateNextRoom() {
   // Update loading text
   const totalRooms = Math.ceil(allImages.length / IMAGES_PER_ROOM);
   if (roomsCreated >= totalRooms) {
-    loadingScreen.style.display = 'none';
+    if (loadingScreen) loadingScreen.classList.add('hidden');
+    if (clickToStart) clickToStart.classList.add('hidden');
   } else {
-    loadingText.textContent = `Generated ${roomsCreated}/${totalRooms} rooms. Walk forward for more.`;
+    if (loadingProgress) loadingProgress.textContent = `Generated ${roomsCreated}/${totalRooms} rooms. Walk forward for more.`;
   }
 }
 
