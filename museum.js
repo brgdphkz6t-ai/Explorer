@@ -1,5 +1,5 @@
 /**
- * 3D Virtual Museum - Main Application
+ * 3D Virtual Museum - Main Application with Lazy Loading
  * 
  * Creates an interactive 3D gallery where users can walk around
  * in first-person view and view artwork on the walls.
@@ -9,6 +9,7 @@
  * - WASD/Arrow keys for movement
  * - Mouse look around
  * - Dynamic image loading from Netlify Functions
+ * - LAZY LOADING: Rooms generated as you walk
  * - Framed artwork display on gallery walls
  */
 
@@ -29,23 +30,22 @@ const velocity = new THREE.Vector3();
 const direction = new THREE.Vector3();
 
 // Gallery configuration
-const GALLERY_WIDTH = 40;
-const GALLERY_HEIGHT = 8;
-const GALLERY_DEPTH = 40;
-const WALL_THICKNESS = 1;
-const IMAGES_PER_ROOM = 6; // Max images per room before creating a new one
-const ROOM_GAP = 5; // Gap between rooms
+const GALLERY_WIDTH = 12;
+const GALLERY_HEIGHT = 5;
+const ROOM_DEPTH = 10;
+const IMAGES_PER_ROOM = 6;
 
-// Image data
-let loadedImages = [];
-let artworks = [];
-let rooms = []; // Array to store room objects for multi-room gallery
+// Lazy loading state
+let allImages = [];
+let roomsCreated = 0;
+let isGenerating = false;
+let isLoadingComplete = false;
 
 // DOM Elements
 const loadingScreen = document.getElementById('loading-screen');
-const loadingProgress = document.getElementById('loading-progress');
-const clickToStart = document.getElementById('click-to-start');
-const errorMessage = document.getElementById('error-message');
+const loadingText = document.getElementById('loading-text');
+const blocker = document.getElementById('blocker');
+const instructions = document.getElementById('instructions');
 
 // ============================================================================
 // INITIALIZATION
@@ -60,8 +60,8 @@ animate();
 async function init() {
   // Create scene
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x1a1a2e);
-  scene.fog = new THREE.Fog(0x1a1a2e, 10, 50);
+  scene.background = new THREE.Color(0x1a1a1a);
+  scene.fog = new THREE.Fog(0x1a1a1a, 0, 40);
 
   // Create camera
   camera = new THREE.PerspectiveCamera(
@@ -70,33 +70,26 @@ async function init() {
     0.1,
     1000
   );
-  camera.position.set(0, 1.7, 5); // Eye level height
+  camera.position.set(0, 1.7, 5);
 
   // Create renderer
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  document.getElementById('canvas-container').appendChild(renderer.domElement);
+  document.body.appendChild(renderer.domElement);
 
   // Setup controls
   setupControls();
 
-  // Create gallery structure with multiple rooms based on image count
-  await loadImages();
-  createMultiRoomGallery();
-
   // Setup lighting
   createLighting();
 
+  // Load images and start lazy generation
+  await loadImages();
+
   // Handle window resize
   window.addEventListener('resize', onWindowResize);
-
-  // Hide loading screen
-  setTimeout(() => {
-    loadingScreen.classList.add('hidden');
-  }, 500);
 }
 
 /**
@@ -106,17 +99,17 @@ function setupControls() {
   controls = new PointerLockControls(camera, document.body);
 
   // Click to start
-  clickToStart.addEventListener('click', () => {
+  blocker.addEventListener('click', () => {
     controls.lock();
   });
 
   // Lock state changes
   controls.addEventListener('lock', () => {
-    clickToStart.classList.add('hidden');
+    blocker.style.display = 'none';
   });
 
   controls.addEventListener('unlock', () => {
-    clickToStart.classList.remove('hidden');
+    blocker.style.display = 'flex';
   });
 
   // Keyboard controls
@@ -167,103 +160,8 @@ function setupControls() {
 }
 
 // ============================================================================
-// GALLERY CONSTRUCTION
+// LIGHTING
 // ============================================================================
-
-/**
- * Create the gallery room structure (floor, ceiling, walls)
- */
-function createGallery() {
-  // Materials
-  const floorMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x2d2d44,
-    roughness: 0.8,
-    metalness: 0.2
-  });
-  
-  const ceilingMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x1a1a2e,
-    roughness: 0.9
-  });
-  
-  const wallMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0xf5f5dc,
-    roughness: 0.9
-  });
-
-  // Floor
-  const floorGeometry = new THREE.PlaneGeometry(GALLERY_WIDTH + 4, GALLERY_DEPTH + 4);
-  const floor = new THREE.Mesh(floorGeometry, floorMaterial);
-  floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
-  scene.add(floor);
-
-  // Ceiling
-  const ceilingGeometry = new THREE.PlaneGeometry(GALLERY_WIDTH + 4, GALLERY_DEPTH + 4);
-  const ceiling = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
-  ceiling.rotation.x = Math.PI / 2;
-  ceiling.position.y = GALLERY_HEIGHT;
-  scene.add(ceiling);
-
-  // Walls
-  // Back wall
-  const backWallGeometry = new THREE.BoxGeometry(GALLERY_WIDTH + 2, GALLERY_HEIGHT, WALL_THICKNESS);
-  const backWall = new THREE.Mesh(backWallGeometry, wallMaterial);
-  backWall.position.set(0, GALLERY_HEIGHT / 2, -GALLERY_DEPTH / 2 - WALL_THICKNESS / 2);
-  backWall.receiveShadow = true;
-  scene.add(backWall);
-
-  // Front wall (with opening)
-  const frontWallLeftGeometry = new THREE.BoxGeometry(10, GALLERY_HEIGHT, WALL_THICKNESS);
-  const frontWallLeft = new THREE.Mesh(frontWallLeftGeometry, wallMaterial);
-  frontWallLeft.position.set(-15, GALLERY_HEIGHT / 2, GALLERY_DEPTH / 2 + WALL_THICKNESS / 2);
-  scene.add(frontWallLeft);
-
-  const frontWallRightGeometry = new THREE.BoxGeometry(10, GALLERY_HEIGHT, WALL_THICKNESS);
-  const frontWallRight = new THREE.Mesh(frontWallRightGeometry, wallMaterial);
-  frontWallRight.position.set(15, GALLERY_HEIGHT / 2, GALLERY_DEPTH / 2 + WALL_THICKNESS / 2);
-  scene.add(frontWallRight);
-
-  // Left wall
-  const leftWallGeometry = new THREE.BoxGeometry(WALL_THICKNESS, GALLERY_HEIGHT, GALLERY_DEPTH);
-  const leftWall = new THREE.Mesh(leftWallGeometry, wallMaterial);
-  leftWall.position.set(-GALLERY_WIDTH / 2 - WALL_THICKNESS / 2, GALLERY_HEIGHT / 2, 0);
-  leftWall.receiveShadow = true;
-  scene.add(leftWall);
-
-  // Right wall
-  const rightWallGeometry = new THREE.BoxGeometry(WALL_THICKNESS, GALLERY_HEIGHT, GALLERY_DEPTH);
-  const rightWall = new THREE.Mesh(rightWallGeometry, wallMaterial);
-  rightWall.position.set(GALLERY_WIDTH / 2 + WALL_THICKNESS / 2, GALLERY_HEIGHT / 2, 0);
-  rightWall.receiveShadow = true;
-  scene.add(rightWall);
-
-  // Add baseboards
-  createBaseboards(wallMaterial);
-}
-
-/**
- * Add decorative baseboards along the walls
- */
-function createBaseboards(material) {
-  const baseboardHeight = 0.3;
-  const baseboardDepth = 0.2;
-  
-  const positions = [
-    { x: 0, z: -GALLERY_DEPTH / 2, rot: 0, size: [GALLERY_WIDTH + 2, baseboardHeight, baseboardDepth] },
-    { x: 0, z: GALLERY_DEPTH / 2, rot: 0, size: [GALLERY_WIDTH + 2, baseboardHeight, baseboardDepth] },
-    { x: -GALLERY_WIDTH / 2, z: 0, rot: Math.PI / 2, size: [baseboardDepth, baseboardHeight, GALLERY_DEPTH] },
-    { x: GALLERY_WIDTH / 2, z: 0, rot: Math.PI / 2, size: [baseboardDepth, baseboardHeight, GALLERY_DEPTH] }
-  ];
-
-  positions.forEach(pos => {
-    const geometry = new THREE.BoxGeometry(...pos.size);
-    const baseboard = new THREE.Mesh(geometry, material);
-    baseboard.position.set(pos.x, baseboardHeight / 2, pos.z);
-    baseboard.rotation.y = pos.rot;
-    scene.add(baseboard);
-  });
-}
 
 /**
  * Create ambient and directional lighting for the gallery
@@ -273,37 +171,15 @@ function createLighting() {
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
   scene.add(ambientLight);
 
-  // Main directional light (simulating ceiling lights)
-  const mainLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  // Main directional light
+  const mainLight = new THREE.DirectionalLight(0xffffff, 0.6);
   mainLight.position.set(0, GALLERY_HEIGHT - 1, 0);
   mainLight.castShadow = true;
-  mainLight.shadow.mapSize.width = 2048;
-  mainLight.shadow.mapSize.height = 2048;
-  mainLight.shadow.camera.near = 0.5;
-  mainLight.shadow.camera.far = 50;
-  mainLight.shadow.camera.left = -25;
-  mainLight.shadow.camera.right = 25;
-  mainLight.shadow.camera.top = 25;
-  mainLight.shadow.camera.bottom = -25;
   scene.add(mainLight);
-
-  // Additional point lights for atmosphere
-  const pointLightPositions = [
-    { x: -15, z: -15 },
-    { x: 15, z: -15 },
-    { x: -15, z: 15 },
-    { x: 15, z: 15 }
-  ];
-
-  pointLightPositions.forEach(pos => {
-    const pointLight = new THREE.PointLight(0xffaa77, 0.3, 20);
-    pointLight.position.set(pos.x, GALLERY_HEIGHT - 1, pos.z);
-    scene.add(pointLight);
-  });
 }
 
 // ============================================================================
-// IMAGE LOADING AND ARTWORK CREATION
+// IMAGE LOADING AND LAZY ROOM GENERATION
 // ============================================================================
 
 /**
@@ -311,9 +187,8 @@ function createLighting() {
  */
 async function loadImages() {
   try {
-    loadingProgress.textContent = 'Fetching images from server...';
+    loadingText.textContent = 'Fetching images from server...';
     
-    // Fetch images from the get-images function
     const response = await fetch('/.netlify/functions/get-images');
     
     if (!response.ok) {
@@ -321,23 +196,37 @@ async function loadImages() {
     }
     
     const data = await response.json();
-    loadedImages = data.images || [];
+    allImages = data.images || [];
     
-    loadingProgress.textContent = `Loading ${loadedImages.length} artworks...`;
+    // Cap at 100 images for performance
+    if (allImages.length > 100) {
+      allImages = allImages.slice(0, 100);
+    }
     
-    if (loadedImages.length === 0) {
+    loadingText.textContent = `Found ${allImages.length} images. Generating gallery...`;
+    
+    if (allImages.length === 0) {
       throw new Error('No images available');
     }
     
-    // Proxy images through our CORS proxy and create artworks
-    await createArtworks();
+    // Start lazy loading - generate first 2 rooms immediately
+    await generateNextRoom();
+    await generateNextRoom();
+    
+    // Update UI
+    setTimeout(() => {
+      loadingScreen.style.opacity = '0.5';
+      loadingText.textContent = 'Walk forward to generate more rooms';
+    }, 1000);
+    
+    isLoadingComplete = true;
     
   } catch (error) {
     console.error('Error loading images:', error);
-    showError(`Failed to load images: ${error.message}. Using fallback gallery.`);
+    loadingText.textContent = 'Failed to load images. Using demo gallery...';
     
     // Use fallback images
-    loadedImages = [
+    allImages = [
       'https://picsum.photos/seed/art1/800/600',
       'https://picsum.photos/seed/art2/800/600',
       'https://picsum.photos/seed/art3/800/600',
@@ -346,298 +235,194 @@ async function loadImages() {
       'https://picsum.photos/seed/art6/800/600'
     ];
     
-    await createArtworks();
+    await generateNextRoom();
+    loadingScreen.style.display = 'none';
+    isLoadingComplete = true;
   }
 }
 
 /**
- * Create framed artworks on the gallery walls
+ * Generate the next room segment (lazy loading)
  */
-async function createArtworks() {
-  const frameColor = 0x4a3728; // Dark wood color
+async function generateNextRoom() {
+  if (isGenerating || roomsCreated * IMAGES_PER_ROOM >= allImages.length) {
+    return;
+  }
+
+  isGenerating = true;
   
-  // Define wall positions for artwork placement
-  const wallPositions = getWallPositions();
+  const startIdx = roomsCreated * IMAGES_PER_ROOM;
+  const roomImages = allImages.slice(startIdx, startIdx + IMAGES_PER_ROOM);
   
-  let imageIndex = 0;
+  if (roomImages.length === 0) {
+    isGenerating = false;
+    return;
+  }
+
+  const zPosition = -(roomsCreated * ROOM_DEPTH);
   
-  for (const position of wallPositions) {
-    if (imageIndex >= loadedImages.length) break;
-    
-    const imageUrl = loadedImages[imageIndex];
-    
-    try {
-      // Proxy the image to get base64 data
-      const proxiedImage = await proxyImage(imageUrl);
-      
-      // Create texture from proxied image
-      const texture = await createTexture(proxiedImage.dataUrl);
-      
-      // Create the artwork with frame
-      createArtworkWithFrame(texture, position, frameColor);
-      
-      imageIndex++;
-      
-      // Update progress
-      loadingProgress.textContent = `Loaded ${imageIndex}/${loadedImages.length} artworks`;
-      
-    } catch (error) {
-      console.error(`Failed to load image ${imageUrl}:`, error);
-    }
+  await createRoomSegment(zPosition, roomImages);
+  
+  roomsCreated++;
+  isGenerating = false;
+
+  // Update loading text
+  const totalRooms = Math.ceil(allImages.length / IMAGES_PER_ROOM);
+  if (roomsCreated >= totalRooms) {
+    loadingScreen.style.display = 'none';
+  } else {
+    loadingText.textContent = `Generated ${roomsCreated}/${totalRooms} rooms. Walk forward for more.`;
   }
 }
 
 /**
- * Get predefined positions for artwork on walls
+ * Create a single room segment with artworks
  */
-function getWallPositions() {
-  const positions = [];
-  const artworkY = GALLERY_HEIGHT / 2;
-  const spacing = 8;
-  
-  // Back wall (3 pieces)
-  for (let i = -1; i <= 1; i++) {
-    positions.push({
-      x: i * spacing,
-      y: artworkY,
-      z: -GALLERY_DEPTH / 2 + 0.6,
-      rotationY: 0
-    });
-  }
-  
-  // Left wall (3 pieces)
-  for (let i = -1; i <= 1; i++) {
-    positions.push({
-      x: -GALLERY_WIDTH / 2 + 0.6,
-      y: artworkY,
-      z: i * spacing,
-      rotationY: Math.PI / 2
-    });
-  }
-  
-  // Right wall (3 pieces)
-  for (let i = -1; i <= 1; i++) {
-    positions.push({
-      x: GALLERY_WIDTH / 2 - 0.6,
-      y: artworkY,
-      z: i * spacing,
-      rotationY: -Math.PI / 2
-    });
-  }
-  
-  return positions;
-}
-
-/**
- * Proxy an image through the Netlify Function to bypass CORS
- */
-async function proxyImage(url) {
-  const proxyUrl = `/.netlify/functions/proxy-image?url=${encodeURIComponent(url)}`;
-  
-  const response = await fetch(proxyUrl);
-  
-  if (!response.ok) {
-    throw new Error(`Proxy failed: ${response.status}`);
-  }
-  
-  return await response.json();
-}
-
-/**
- * Create a Three.js texture from a data URL
- */
-function createTexture(dataUrl) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    
-    img.onload = () => {
-      const texture = new THREE.Texture(img);
-      texture.needsUpdate = true;
-      texture.colorSpace = THREE.SRGBColorSpace;
-      resolve(texture);
-    };
-    
-    img.onerror = reject;
-    img.src = dataUrl;
+async function createRoomSegment(zOffset, images) {
+  const wallMaterial = new THREE.MeshStandardMaterial({ 
+    color: 0xeeeeee, 
+    roughness: 0.5 
   });
+
+  // Floor
+  const floorGeo = new THREE.PlaneGeometry(GALLERY_WIDTH, ROOM_DEPTH);
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(0, 0, zOffset);
+  scene.add(floor);
+
+  // Ceiling
+  const ceilGeo = new THREE.PlaneGeometry(GALLERY_WIDTH, ROOM_DEPTH);
+  const ceilMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+  const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
+  ceiling.rotation.x = Math.PI / 2;
+  ceiling.position.set(0, GALLERY_HEIGHT, zOffset);
+  scene.add(ceiling);
+
+  // Left Wall
+  const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_DEPTH, GALLERY_HEIGHT), wallMaterial);
+  leftWall.rotation.y = Math.PI / 2;
+  leftWall.position.set(-GALLERY_WIDTH / 2, GALLERY_HEIGHT / 2, zOffset);
+  scene.add(leftWall);
+
+  // Right Wall
+  const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_DEPTH, GALLERY_HEIGHT), wallMaterial);
+  rightWall.rotation.y = -Math.PI / 2;
+  rightWall.position.set(GALLERY_WIDTH / 2, GALLERY_HEIGHT / 2, zOffset);
+  scene.add(rightWall);
+
+  // Place images on walls
+  const imagesPerSide = Math.ceil(images.length / 2);
+  
+  // Left wall images
+  for (let i = 0; i < Math.min(imagesPerSide, images.length); i++) {
+    const imgUrl = images[i];
+    const zPos = zOffset - (ROOM_DEPTH / 2) + 2 + (i * (ROOM_DEPTH - 4) / Math.max(1, imagesPerSide - 1));
+    await createFramedPicture(imgUrl, -GALLERY_WIDTH / 2 + 0.1, GALLERY_HEIGHT / 2, zPos, Math.PI / 2);
+  }
+
+  // Right wall images
+  for (let i = 0; i < images.length - imagesPerSide; i++) {
+    const imgUrl = images[imagesPerSide + i];
+    const zPos = zOffset - (ROOM_DEPTH / 2) + 2 + (i * (ROOM_DEPTH - 4) / Math.max(1, images.length - imagesPerSide - 1));
+    await createFramedPicture(imgUrl, GALLERY_WIDTH / 2 - 0.1, GALLERY_HEIGHT / 2, zPos, -Math.PI / 2);
+  }
 }
 
 /**
- * Create a framed artwork at the specified position
+ * Create a single framed picture with spotlight
  */
-function createArtworkWithFrame(texture, position, frameColor) {
-  // Calculate aspect ratio
-  const imageWidth = 3;
-  const imageHeight = (imageWidth * texture.image.height) / texture.image.width;
-  
-  // Frame dimensions
-  const frameDepth = 0.1;
-  const frameBorder = 0.15;
-  
-  // Create group to hold artwork
-  const artworkGroup = new THREE.Group();
-  
-  // Canvas/Artwork
-  const canvasGeometry = new THREE.PlaneGeometry(imageWidth, imageHeight);
-  const canvasMaterial = new THREE.MeshStandardMaterial({ 
-    map: texture,
-    roughness: 0.3,
-    metalness: 0.1
+function createFramedPicture(imageUrl, x, y, z, rotationY) {
+  return new Promise((resolve) => {
+    const loader = new THREE.TextureLoader();
+    loader.load(
+      imageUrl,
+      (texture) => {
+        const aspect = texture.image.width / texture.image.height;
+        const height = 2.5;
+        const width = height * aspect;
+
+        // Picture Mesh
+        const geometry = new THREE.PlaneGeometry(width, height);
+        const material = new THREE.MeshBasicMaterial({ map: texture });
+        const mesh = new THREE.Mesh(geometry, material);
+        
+        // Frame
+        const frameGeo = new THREE.BoxGeometry(width + 0.15, height + 0.15, 0.05);
+        const frameMat = new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.7 });
+        const frame = new THREE.Mesh(frameGeo, frameMat);
+        frame.position.z = -0.03;
+        mesh.add(frame);
+
+        // Positioning
+        mesh.position.set(x, y, z);
+        mesh.rotation.y = rotationY;
+
+        // Spotlight
+        const spotLight = new THREE.SpotLight(0xffaa00, 2);
+        spotLight.position.set(x, y + 2, z + 1);
+        spotLight.target = mesh;
+        spotLight.angle = Math.PI / 6;
+        spotLight.penumbra = 0.5;
+        spotLight.castShadow = true;
+        
+        scene.add(mesh);
+        scene.add(spotLight);
+        scene.add(spotLight.target);
+        
+        resolve(mesh);
+      },
+      undefined,
+      () => resolve(null)
+    );
   });
-  const canvas = new THREE.Mesh(canvasGeometry, canvasMaterial);
-  canvas.position.z = frameDepth / 2;
-  canvas.castShadow = true;
-  artworkGroup.add(canvas);
-  
-  // Frame
-  const frameGeometry = new THREE.BoxGeometry(
-    imageWidth + frameBorder * 2,
-    imageHeight + frameBorder * 2,
-    frameDepth
-  );
-  
-  // Create frame material with wood-like color
-  const frameMaterial = new THREE.MeshStandardMaterial({ 
-    color: frameColor,
-    roughness: 0.7,
-    metalness: 0.1
-  });
-  
-  const frame = new THREE.Mesh(frameGeometry, frameMaterial);
-  
-  // Use CSG-like approach: create frame by combining borders
-  artworkGroup.remove(frame); // Remove solid box
-  
-  // Create frame borders
-  const borderThickness = frameBorder;
-  const borderDepth = frameDepth;
-  
-  // Top border
-  const topBorder = new THREE.Mesh(
-    new THREE.BoxGeometry(imageWidth + frameBorder, borderThickness, borderDepth),
-    frameMaterial
-  );
-  topBorder.position.y = imageHeight / 2 + borderThickness / 2;
-  topBorder.position.z = 0;
-  artworkGroup.add(topBorder);
-  
-  // Bottom border
-  const bottomBorder = new THREE.Mesh(
-    new THREE.BoxGeometry(imageWidth + frameBorder, borderThickness, borderDepth),
-    frameMaterial
-  );
-  bottomBorder.position.y = -imageHeight / 2 - borderThickness / 2;
-  bottomBorder.position.z = 0;
-  artworkGroup.add(bottomBorder);
-  
-  // Left border
-  const leftBorder = new THREE.Mesh(
-    new THREE.BoxGeometry(borderThickness, imageHeight, borderDepth),
-    frameMaterial
-  );
-  leftBorder.position.x = -imageWidth / 2 - borderThickness / 2;
-  leftBorder.position.z = 0;
-  artworkGroup.add(leftBorder);
-  
-  // Right border
-  const rightBorder = new THREE.Mesh(
-    new THREE.BoxGeometry(borderThickness, imageHeight, borderDepth),
-    frameMaterial
-  );
-  rightBorder.position.x = imageWidth / 2 + borderThickness / 2;
-  rightBorder.position.z = 0;
-  artworkGroup.add(rightBorder);
-  
-  // Position the artwork
-  artworkGroup.position.set(position.x, position.y, position.z);
-  artworkGroup.rotation.y = position.rotationY;
-  
-  // Add spotlight for the artwork
-  const spotlight = new THREE.SpotLight(0xffffff, 0.5);
-  spotlight.position.set(position.x, GALLERY_HEIGHT - 1, position.z + 2);
-  spotlight.target = canvas;
-  spotlight.angle = Math.PI / 6;
-  spotlight.penumbra = 0.3;
-  spotlight.castShadow = true;
-  scene.add(spotlight);
-  scene.add(spotlight.target);
-  
-  scene.add(artworkGroup);
-  artworks.push(artworkGroup);
-}
-
-// ============================================================================
-// UTILITY FUNCTIONS
-// ============================================================================
-
-/**
- * Show an error message to the user
- */
-function showError(message) {
-  errorMessage.textContent = message;
-  errorMessage.classList.add('visible');
-  
-  // Auto-hide after 5 seconds
-  setTimeout(() => {
-    errorMessage.classList.remove('visible');
-  }, 5000);
-}
-
-/**
- * Handle window resize events
- */
-function onWindowResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
 // ============================================================================
 // ANIMATION LOOP
 // ============================================================================
 
-/**
- * Main animation loop
- */
 function animate() {
   requestAnimationFrame(animate);
-  
+
   const time = performance.now();
   const delta = (time - prevTime) / 1000;
-  
+
   if (controls.isLocked) {
-    // Apply friction
+    // Movement Logic
     velocity.x -= velocity.x * 10.0 * delta;
     velocity.z -= velocity.z * 10.0 * delta;
-    
-    // Calculate movement direction
+
     direction.z = Number(moveForward) - Number(moveBackward);
     direction.x = Number(moveRight) - Number(moveLeft);
     direction.normalize();
-    
-    // Apply movement
-    if (moveForward || moveBackward) {
-      velocity.z -= direction.z * 100.0 * delta;
-    }
-    if (moveLeft || moveRight) {
-      velocity.x -= direction.x * 100.0 * delta;
-    }
-    
-    // Move controls
+
+    if (moveForward || moveBackward) velocity.z -= direction.z * 100.0 * delta;
+    if (moveLeft || moveRight) velocity.x -= direction.x * 100.0 * delta;
+
     controls.moveRight(-velocity.x * delta);
     controls.moveForward(-velocity.z * delta);
-    
-    // Boundary checking - keep player inside the gallery
-    const boundaryX = GALLERY_WIDTH / 2 - 1;
-    const boundaryZ = GALLERY_DEPTH / 2 - 1;
-    
-    if (camera.position.x < -boundaryX) camera.position.x = -boundaryX;
-    if (camera.position.x > boundaryX) camera.position.x = boundaryX;
-    if (camera.position.z < -boundaryZ) camera.position.z = -boundaryZ;
-    if (camera.position.z > boundaryZ) camera.position.z = boundaryZ;
+
+    // Lazy Loading Trigger: If user walks near the end of generated rooms
+    if (isLoadingComplete) {
+      const triggerZ = -(roomsCreated * ROOM_DEPTH) + 15;
+      if (camera.position.z < triggerZ) {
+        generateNextRoom();
+      }
+    }
   }
-  
+
   prevTime = time;
   renderer.render(scene, camera);
+}
+
+// ============================================================================
+// EVENT HANDLERS
+// ============================================================================
+
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
 }
