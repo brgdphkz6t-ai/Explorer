@@ -2,7 +2,7 @@ import cheerio from 'cheerio';
 
 /**
  * Netlify Function: get-images
- * Scrapes erome.com/explore/ to extract image URLs
+ * Scrapes erome.com/explore/new to extract image URLs
  * Returns a JSON array of image URLs or fallback demo images
  */
 export async function handler(event, context) {
@@ -31,13 +31,15 @@ export async function handler(event, context) {
   }
 
   try {
-    // Fetch the explore page with proper headers to avoid bot detection
-    const response = await fetch('https://www.erome.com/explore/', {
+    // Fetch the explore/new page with proper headers to avoid bot detection
+    const response = await fetch('https://www.erome.com/explore/new', {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
-        'Referer': 'https://www.erome.com/'
+        'Referer': 'https://www.erome.com/',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate'
       }
     });
 
@@ -50,24 +52,51 @@ export async function handler(event, context) {
     
     const images = [];
     
-    // Extract image URLs from the page
-    // Erome uses various selectors for images - try multiple approaches
-    $('img').each((i, elem) => {
-      const src = $(elem).attr('src') || $(elem).attr('data-src');
-      if (src && (src.startsWith('http') || src.startsWith('/'))) {
-        // Normalize relative URLs
-        const fullUrl = src.startsWith('/') ? `https://www.erome.com${src}` : src;
+    // Extract image URLs from the page using multiple strategies
+    // Strategy 1: Look for album thumbnails and content images
+    $('img[data-src], img[src]').each((i, elem) => {
+      const src = $(elem).attr('data-src') || $(elem).attr('src');
+      if (src) {
+        let fullUrl = src;
         
-        // Filter for actual content images (not icons, logos, etc.)
-        if (!fullUrl.includes('logo') && 
+        // Handle different URL formats
+        if (src.startsWith('//')) {
+          fullUrl = 'https:' + src;
+        } else if (src.startsWith('/')) {
+          fullUrl = 'https://www.erome.com' + src;
+        }
+        
+        // Filter for actual content images
+        if (fullUrl.startsWith('https://') && 
+            !fullUrl.includes('logo') && 
             !fullUrl.includes('icon') && 
             !fullUrl.includes('avatar') &&
-            (fullUrl.endsWith('.jpg') || 
-             fullUrl.endsWith('.jpeg') || 
-             fullUrl.endsWith('.png') || 
-             fullUrl.endsWith('.webp') ||
-             fullUrl.includes('/img/'))) {
+            !fullUrl.includes('default') &&
+            (fullUrl.includes('/img/') || 
+             fullUrl.includes('/media/') ||
+             fullUrl.match(/\.(jpg|jpeg|png|webp|gif)(\?|$)/i))) {
           images.push(fullUrl);
+        }
+      }
+    });
+    
+    // Strategy 2: Look for video/image links in anchor tags
+    $('a[href*="/a/"], a[href*="/album/"]').each((i, elem) => {
+      const href = $(elem).attr('href');
+      if (href && !href.startsWith('#')) {
+        const fullUrl = href.startsWith('/') ? 'https://www.erome.com' + href : href;
+        // Try to get preview images from these albums
+        const imgSrc = $(elem).find('img[data-src], img[src]').first().attr('data-src') || $(elem).find('img').first().attr('src');
+        if (imgSrc) {
+          let imgUrl = imgSrc;
+          if (imgSrc.startsWith('//')) {
+            imgUrl = 'https:' + imgSrc;
+          } else if (imgSrc.startsWith('/')) {
+            imgUrl = 'https://www.erome.com' + imgSrc;
+          }
+          if (imgUrl.startsWith('https://') && !images.includes(imgUrl)) {
+            images.push(imgUrl);
+          }
         }
       }
     });
