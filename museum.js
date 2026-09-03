@@ -44,8 +44,6 @@ let isLoadingComplete = false;
 // DOM Elements
 const loadingScreen = document.getElementById('loading-screen');
 const loadingText = document.getElementById('loading-text');
-const blocker = document.getElementById('blocker');
-const instructions = document.getElementById('instructions');
 
 // ============================================================================
 // INITIALIZATION
@@ -98,18 +96,18 @@ async function init() {
 function setupControls() {
   controls = new PointerLockControls(camera, document.body);
 
-  // Click to start
-  blocker.addEventListener('click', () => {
+  // Click anywhere on document to start
+  document.addEventListener('click', () => {
     controls.lock();
   });
 
   // Lock state changes
   controls.addEventListener('lock', () => {
-    blocker.style.display = 'none';
+    if (loadingScreen) loadingScreen.style.display = 'none';
   });
 
   controls.addEventListener('unlock', () => {
-    blocker.style.display = 'flex';
+    // Optionally show a pause menu here
   });
 
   // Keyboard controls
