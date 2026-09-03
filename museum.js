@@ -120,9 +120,9 @@ async function loadImages() {
     
     if (images.length > 0) {
       allImages = images.slice(0, MAX_IMAGES);
-      console.log(`Loaded ${allImages.length} images from ${data.source || 'server'}`);
+      console.log(`Fetched ${allImages.length} image URLs`);
       
-      // Start generating rooms immediately
+      // Generate first two rooms immediately
       generateNextRoom();
     } else {
       throw new Error('No images returned from server');
