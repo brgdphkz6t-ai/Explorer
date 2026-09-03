@@ -9,10 +9,11 @@ export async function handler(event, context) {
   // Set CORS headers for all responses
   const headers = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Origin, X-Requested-With, Accept',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Content-Type': 'application/json'
   };
-
+  
   // Handle preflight OPTIONS request
   if (event.httpMethod === 'OPTIONS') {
     return {
@@ -20,7 +21,7 @@ export async function handler(event, context) {
       headers
     };
   }
-
+  
   // Only allow GET requests
   if (event.httpMethod !== 'GET') {
     return {
@@ -29,21 +30,28 @@ export async function handler(event, context) {
       body: JSON.stringify({ error: 'Method not allowed' })
     };
   }
-
+  
   try {
     // Fetch the explore/new page with proper headers to avoid bot detection
     const response = await fetch('https://www.erome.com/explore/new', {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Referer': 'https://www.erome.com/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
         'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate'
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
       }
     });
 
     if (!response.ok) {
+      console.error(`Failed to fetch erome.com: ${response.status} ${response.statusText}`);
       throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
     }
 
@@ -52,57 +60,47 @@ export async function handler(event, context) {
     
     const images = [];
     
-    // Extract image URLs from the page using multiple strategies
-    // Strategy 1: Look for album thumbnails and content images
-    $('img[data-src], img[src]').each((i, elem) => {
-      const src = $(elem).attr('data-src') || $(elem).attr('src');
+    // Strategy 1: Look for lazy-loaded images with data-src attribute
+    $('img[data-src]').each((i, elem) => {
+      let src = $(elem).attr('data-src');
       if (src) {
-        let fullUrl = src;
+        let fullUrl = normalizeUrl(src);
         
-        // Handle different URL formats
-        if (src.startsWith('//')) {
-          fullUrl = 'https:' + src;
-        } else if (src.startsWith('/')) {
-          fullUrl = 'https://www.erome.com' + src;
-        }
-        
-        // Filter for actual content images
-        if (fullUrl.startsWith('https://') && 
-            !fullUrl.includes('logo') && 
-            !fullUrl.includes('icon') && 
-            !fullUrl.includes('avatar') &&
-            !fullUrl.includes('default') &&
-            (fullUrl.includes('/img/') || 
-             fullUrl.includes('/media/') ||
-             fullUrl.match(/\.(jpg|jpeg|png|webp|gif)(\?|$)/i))) {
+        // Filter for actual content images (exclude UI elements)
+        if (isValidContentImage(fullUrl)) {
           images.push(fullUrl);
         }
       }
     });
     
-    // Strategy 2: Look for video/image links in anchor tags
-    $('a[href*="/a/"], a[href*="/album/"]').each((i, elem) => {
-      const href = $(elem).attr('href');
-      if (href && !href.startsWith('#')) {
-        const fullUrl = href.startsWith('/') ? 'https://www.erome.com' + href : href;
-        // Try to get preview images from these albums
-        const imgSrc = $(elem).find('img[data-src], img[src]').first().attr('data-src') || $(elem).find('img').first().attr('src');
-        if (imgSrc) {
-          let imgUrl = imgSrc;
-          if (imgSrc.startsWith('//')) {
-            imgUrl = 'https:' + imgSrc;
-          } else if (imgSrc.startsWith('/')) {
-            imgUrl = 'https://www.erome.com' + imgSrc;
-          }
-          if (imgUrl.startsWith('https://') && !images.includes(imgUrl)) {
-            images.push(imgUrl);
-          }
+    // Strategy 2: Look for regular img src attributes
+    $('img[src]').each((i, elem) => {
+      let src = $(elem).attr('src');
+      if (src) {
+        let fullUrl = normalizeUrl(src);
+        
+        // Filter for actual content images
+        if (isValidContentImage(fullUrl) && !images.includes(fullUrl)) {
+          images.push(fullUrl);
+        }
+      }
+    });
+    
+    // Strategy 3: Look for video thumbnails which often have good images
+    $('.video-thumb img, .album-thumb img, .thumb img').each((i, elem) => {
+      let src = $(elem).attr('data-src') || $(elem).attr('src');
+      if (src) {
+        let fullUrl = normalizeUrl(src);
+        if (isValidContentImage(fullUrl) && !images.includes(fullUrl)) {
+          images.push(fullUrl);
         }
       }
     });
 
-    // Remove duplicates
-    const uniqueImages = [...new Set(images)];
+    // Remove duplicates while preserving order
+    const uniqueImages = [...new Set(images.filter(url => url && url.length > 10))];
+
+    console.log(`Found ${uniqueImages.length} unique images`);
 
     // If no images found, return fallback demo gallery
     if (uniqueImages.length === 0) {
@@ -112,18 +110,20 @@ export async function handler(event, context) {
         headers,
         body: JSON.stringify({
           images: getFallbackImages(),
-          source: 'fallback'
+          source: 'fallback',
+          message: 'Scraping returned no results, using placeholder images'
         })
       };
     }
 
-    // Return up to 20 images
+    // Return up to 24 images (enough for gallery walls)
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
-        images: uniqueImages.slice(0, 20),
-        source: 'scraped'
+        images: uniqueImages.slice(0, 24),
+        source: 'scraped',
+        count: Math.min(uniqueImages.length, 24)
       })
     };
 
@@ -141,6 +141,61 @@ export async function handler(event, context) {
       })
     };
   }
+}
+
+/**
+ * Normalize URL to absolute HTTPS format
+ */
+function normalizeUrl(url) {
+  if (!url) return '';
+  
+  let fullUrl = url.trim();
+  
+  // Handle different URL formats
+  if (fullUrl.startsWith('//')) {
+    fullUrl = 'https:' + fullUrl;
+  } else if (fullUrl.startsWith('/')) {
+    fullUrl = 'https://www.erome.com' + fullUrl;
+  } else if (fullUrl.startsWith('http://')) {
+    fullUrl = fullUrl.replace('http://', 'https://');
+  }
+  
+  return fullUrl;
+}
+
+/**
+ * Validate if URL is a valid content image (not UI element)
+ */
+function isValidContentImage(url) {
+  if (!url || !url.startsWith('https://')) return false;
+  
+  // Exclude UI elements
+  const excludePatterns = [
+    'logo', 'icon', 'avatar', 'default', 'placeholder',
+    'blank', 'spacer', 'loading', 'spinner', 'ad-', 'banner',
+    '/assets/', '/static/', '/js/', '/css/'
+  ];
+  
+  for (const pattern of excludePatterns) {
+    if (url.toLowerCase().includes(pattern)) return false;
+  }
+  
+  // Include only actual image files or known image hosts
+  const includePatterns = [
+    /\.(jpg|jpeg|png|webp|gif)(\?|$)/i,
+    '/img/', '/media/', '/uploads/', '/content/',
+    'i.imgur.com', 'cdn.', 'image.', 'pic.'
+  ];
+  
+  for (const pattern of includePatterns) {
+    if (typeof pattern === 'string' && url.includes(pattern)) return true;
+    if (pattern instanceof RegExp && pattern.test(url)) return true;
+  }
+  
+  // Be permissive for erome.com images
+  if (url.includes('erome.com') && !url.includes('/assets/')) return true;
+  
+  return false;
 }
 
 /**
