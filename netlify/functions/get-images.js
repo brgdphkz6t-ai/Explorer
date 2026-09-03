@@ -46,7 +46,8 @@ export async function handler(event, context) {
         'Sec-Fetch-Site': 'none',
         'Sec-Fetch-User': '?1',
         'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache'
+        'Pragma': 'no-cache',
+        'Referer': 'https://www.erome.com/'
       }
     });
 

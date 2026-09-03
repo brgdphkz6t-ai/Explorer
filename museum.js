@@ -33,10 +33,13 @@ const GALLERY_WIDTH = 40;
 const GALLERY_HEIGHT = 8;
 const GALLERY_DEPTH = 40;
 const WALL_THICKNESS = 1;
+const IMAGES_PER_ROOM = 6; // Max images per room before creating a new one
+const ROOM_GAP = 5; // Gap between rooms
 
 // Image data
 let loadedImages = [];
 let artworks = [];
+let rooms = []; // Array to store room objects for multi-room gallery
 
 // DOM Elements
 const loadingScreen = document.getElementById('loading-screen');
@@ -80,14 +83,12 @@ async function init() {
   // Setup controls
   setupControls();
 
-  // Create gallery structure
-  createGallery();
+  // Create gallery structure with multiple rooms based on image count
+  await loadImages();
+  createMultiRoomGallery();
 
   // Setup lighting
   createLighting();
-
-  // Load images
-  await loadImages();
 
   // Handle window resize
   window.addEventListener('resize', onWindowResize);
