@@ -60,9 +60,9 @@ export async function handler(event, context) {
     
     const images = [];
     
-    // Strategy 1: Look for lazy-loaded images with data-src attribute
-    $('img[data-src]').each((i, elem) => {
-      let src = $(elem).attr('data-src');
+    // Strategy 1: Look for album/video thumbnails in the explore grid
+    $('.album-img img, .video-thumb img, .thumb img, .media-grid img').each((i, elem) => {
+      let src = $(elem).attr('data-src') || $(elem).attr('src');
       if (src) {
         let fullUrl = normalizeUrl(src);
         
@@ -73,9 +73,9 @@ export async function handler(event, context) {
       }
     });
     
-    // Strategy 2: Look for regular img src attributes
-    $('img[src]').each((i, elem) => {
-      let src = $(elem).attr('src');
+    // Strategy 2: Look for lazy-loaded images with data-src attribute anywhere on page
+    $('img[data-src]').each((i, elem) => {
+      let src = $(elem).attr('data-src');
       if (src) {
         let fullUrl = normalizeUrl(src);
         
@@ -86,11 +86,13 @@ export async function handler(event, context) {
       }
     });
     
-    // Strategy 3: Look for video thumbnails which often have good images
-    $('.video-thumb img, .album-thumb img, .thumb img').each((i, elem) => {
-      let src = $(elem).attr('data-src') || $(elem).attr('src');
+    // Strategy 3: Look for regular img src attributes
+    $('img[src]').each((i, elem) => {
+      let src = $(elem).attr('src');
       if (src) {
         let fullUrl = normalizeUrl(src);
+        
+        // Filter for actual content images
         if (isValidContentImage(fullUrl) && !images.includes(fullUrl)) {
           images.push(fullUrl);
         }
@@ -180,6 +182,9 @@ function isValidContentImage(url) {
     if (url.toLowerCase().includes(pattern)) return false;
   }
   
+  // Be permissive for erome.com images - include all images from their CDN
+  if (url.includes('erome.com') && !url.includes('/assets/')) return true;
+  
   // Include only actual image files or known image hosts
   const includePatterns = [
     /\.(jpg|jpeg|png|webp|gif)(\?|$)/i,
@@ -191,9 +196,6 @@ function isValidContentImage(url) {
     if (typeof pattern === 'string' && url.includes(pattern)) return true;
     if (pattern instanceof RegExp && pattern.test(url)) return true;
   }
-  
-  // Be permissive for erome.com images
-  if (url.includes('erome.com') && !url.includes('/assets/')) return true;
   
   return false;
 }
