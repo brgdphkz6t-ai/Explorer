@@ -1,88 +1,73 @@
-# 3D Virtual Museum
+# 3D Virtual Museum V2 🏛️
 
-An interactive 3D virtual museum where users can walk around in first-person view and view artwork on gallery walls. Built with Three.js and deployed on Netlify using serverless functions.
+An enhanced interactive 3D virtual museum with improved graphics, lighting, and performance. Walk through an endless gallery in first-person view and view artwork on the walls. Built with Three.js and deployed on Netlify using serverless functions.
 
-## 🏛️ Features
+## ✨ V2 Improvements
 
-- **First-Person Navigation**: Walk around the gallery using WASD or arrow keys
-- **Mouse Look**: Look around freely with mouse controls (Pointer Lock API)
-- **Dynamic Image Loading**: Fetches images from external sources via serverless functions
-- **Framed Artwork**: Images displayed as framed paintings with proper lighting
-- **Responsive Design**: Adapts to different screen sizes
-- **Fallback Gallery**: Uses placeholder images if scraping fails
+- **Enhanced Graphics**: Better materials, shadows, and lighting
+- **Improved Performance**: Optimized texture management and rendering
+- **Better Room Design**: Larger galleries with proper spotlights
+- **Artwork Counter**: Track how many pieces you've viewed
+- **Smoother Controls**: Refined movement physics
+- **Elegant Frames**: Beveled wooden frames for each artwork
+- **Configurable Settings**: Easy-to-adjust configuration object
+
+## 🎮 Features
+
+- **First-Person Navigation**: WASD or arrow keys to walk around
+- **Mouse Look**: Free look with Pointer Lock API
+- **Dynamic Image Loading**: Fetches art images via serverless functions
+- **Procedural Gallery Rooms**: Endless rooms generated as you explore
+- **Realistic Lighting**: Spotlights and ambient lighting
+- **Responsive Design**: Adapts to any screen size
+- **Fallback Gallery**: Beautiful placeholder images if scraping fails
+
+## 🚀 Quick Start
+
+### Local Development
+
+```bash
+npm install
+npm run dev
+```
+
+Open `http://localhost:8888` in your browser.
+
+### Deploy to Netlify
+
+**Option 1: GitHub + Netlify (Recommended)**
+```bash
+git init
+git add .
+git commit -m "Initial commit"
+git branch -M main
+git remote add origin https://github.com/YOUR_USERNAME/museum-v2.git
+git push -u origin main
+```
+
+Then connect your repo on [netlify.com](https://netlify.com).
+
+**Option 2: Netlify CLI**
+```bash
+npm install -g netlify-cli
+netlify login
+netlify deploy --prod
+```
 
 ## 📁 File Structure
 
 ```
 /
-├── index.html                 # Main HTML page with UI overlays
-├── museum.js                  # Three.js 3D scene and controls
-├── package.json               # Node.js dependencies
-├── netlify.toml              # Netlify build configuration
-└── netlify/
-    └── functions/
-        ├── get-images.js      # Scrapes images from external source
-        └── proxy-image.js     # CORS proxy for external images
+├── index.html                 # Main page with UI overlays
+├── museum.js                  # Three.js 3D scene and logic
+├── package.json               # Dependencies
+├── netlify.toml              # Netlify configuration
+└── netlify/functions/
+    ├── get-images.js         # Scrapes art image URLs
+    └── proxy-image.js        # CORS proxy for textures
 ```
 
-## 🚀 Deployment Instructions
-
-### Option 1: Deploy via GitHub (Recommended)
-
-1. **Push to GitHub**
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit"
-   git branch -M main
-   git remote add origin https://github.com/YOUR_USERNAME/3d-virtual-museum.git
-   git push -u origin main
-   ```
-
-2. **Connect to Netlify**
-   - Go to [netlify.com](https://netlify.com) and sign in
-   - Click "Add new site" → "Import an existing project"
-   - Choose GitHub and select your repository
-   - Netlify will auto-detect the settings from `netlify.toml`
-
-3. **Deploy**
-   - Click "Deploy site"
-   - Wait for the build to complete
-   - Your site will be live at `https://your-site-name.netlify.app`
-
-### Option 2: Deploy via Netlify CLI
-
-1. **Install Netlify CLI**
-   ```bash
-   npm install -g netlify-cli
-   ```
-
-2. **Login to Netlify**
-   ```bash
-   netlify login
-   ```
-
-3. **Deploy**
-   ```bash
-   netlify deploy --prod
-   ```
-
-### Option 3: Local Development
-
-1. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-2. **Start local development server**
-   ```bash
-   npm run dev
-   ```
-
-3. **Open browser**
-   Navigate to `http://localhost:8888`
-
-## 🎮 Controls
+## 🎯 Controls
 
 | Key | Action |
 |-----|--------|
@@ -91,52 +76,39 @@ An interactive 3D virtual museum where users can walk around in first-person vie
 | A / ← | Strafe left |
 | D / → | Strafe right |
 | Mouse | Look around |
-| ESC | Release mouse cursor |
+| ESC | Release cursor |
 
-## ⚙️ Technical Details
+## ⚙️ Configuration
 
-### Frontend
-- **Three.js r0.160** - 3D graphics library
-- **PointerLockControls** - First-person camera controls
-- **Import Maps** - CDN-based module loading (no bundler needed)
+Edit the `CONFIG` object in `museum.js`:
 
-### Backend (Netlify Functions)
-- **get-images.js** - Scrapes image URLs using Cheerio
-  - Uses proper User-Agent headers to avoid bot detection
-  - Returns fallback images if scraping fails
-  - Handles CORS with appropriate headers
-  
-- **proxy-image.js** - Proxies external images
-  - Converts images to base64 data URLs
-  - Bypasses CORS restrictions for Three.js textures
-  - Supports all common image formats
+```javascript
+const CONFIG = {
+  ROOM_WIDTH: 50,           // Gallery width
+  ROOM_HEIGHT: 18,          // Ceiling height
+  ROOM_DEPTH: 50,           // Room depth
+  PICS_PER_ROOM: 6,         // Artworks per room
+  MAX_ACTIVE_TEXTURES: 12,  // Memory limit
+  MOVE_SPEED: 80,           // Walk speed
+  FOG_DENSITY: 0.02         // Atmosphere density
+};
+```
 
-### CORS Handling
-The application handles CORS in two ways:
-1. Server-side scraping avoids browser CORS entirely
-2. Image proxy converts external images to base64 data URLs
+## 🔧 Technical Stack
 
-## ⚠️ Important Notes
+- **Three.js r0.160** - 3D WebGL rendering
+- **PointerLockControls** - FPS camera controls
+- **Netlify Functions** - Serverless backend
+- **Cheerio** - HTML parsing for scraping
+- **Import Maps** - CDN module loading (no bundler)
 
-### Potential Issues with External Sources
+## 📝 Notes
 
-1. **Cloudflare Protection**: The target website (erome.com) uses Cloudflare which may block automated requests. If scraping fails, the site automatically falls back to placeholder images from Picsum Photos.
+- Images are fetched from art websites or fallback to curated placeholders
+- The proxy function converts images to base64 to avoid CORS issues
+- Old textures are automatically disposed to prevent memory leaks
+- Works best in modern browsers (Chrome, Firefox, Edge)
 
-2. **Rate Limiting**: Be mindful of request rates when deploying publicly. Consider adding caching or rate limiting for production use.
+## 📄 License
 
-3. **Copyright**: Ensure you have rights to display any scraped images. The fallback gallery uses public domain / Creative Commons images.
-
-### Customization
-
-- **Change Image Source**: Modify the URL in `netlify/functions/get-images.js`
-- **Gallery Size**: Adjust `GALLERY_WIDTH`, `GALLERY_HEIGHT`, `GALLERY_DEPTH` in `museum.js`
-- **Artwork Count**: Modify `getWallPositions()` function in `museum.js`
-- **Frame Color**: Change `frameColor` in `createArtworks()` function
-
-## 📝 License
-
-This project is provided as-is for educational purposes.
-
-## 🤝 Contributing
-
-Feel free to submit issues and enhancement requests!
+MIT License - Feel free to use and modify!

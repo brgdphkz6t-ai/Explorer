@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>3D Virtual Museum</title>
+  <title>3D Virtual Museum V2</title>
   <style>
     * {
       margin: 0;
@@ -184,6 +184,26 @@
         opacity: 1;
       }
     }
+
+    /* Artwork Counter */
+    #artwork-counter {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      background: rgba(0, 0, 0, 0.7);
+      color: #fff;
+      padding: 10px 15px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      z-index: 100;
+      backdrop-filter: blur(5px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    #artwork-counter span {
+      color: #4a90d9;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
@@ -193,9 +213,9 @@
   <!-- Loading Screen -->
   <div id="loading-screen">
     <div class="loader"></div>
-    <h1>Virtual Museum</h1>
+    <h1>Virtual Museum V2</h1>
     <p>Loading gallery...</p>
-    <div id="loading-progress">Fetching images...</div>
+    <div id="loading-progress">Fetching artworks...</div>
   </div>
 
   <!-- Click to Start Overlay -->
@@ -216,6 +236,11 @@
       <li>Mouse - Look around</li>
       <li><kbd>ESC</kbd> - Release mouse cursor</li>
     </ul>
+  </div>
+
+  <!-- Artwork Counter -->
+  <div id="artwork-counter">
+    Artworks Loaded: <span id="artwork-count">0</span>
   </div>
 
   <!-- Error Message -->
