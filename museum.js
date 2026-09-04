@@ -156,20 +156,21 @@ function showError(message) {
 
 // === IMAGE LOADING ===
 async function loadImages() {
-  updateLoadingProgress('Contacting server...');
+  updateLoadingProgress('Loading artwork collection...');
 
   try {
     const response = await fetch('/.netlify/functions/get-images');
     const data = await response.json();
 
-    if (data.success && data.images && data.images.length > 0) {
-      imageQueue = data.images;
+    if (data.images && data.images.length > 0) {
+      // Convert direct URLs to proxy URLs to avoid CORS issues
+      imageQueue = data.images.map(url => `/.netlify/functions/proxy-image?url=${encodeURIComponent(url)}`);
       console.log(`✅ Loaded ${imageQueue.length} images from server`);
     } else {
       throw new Error('No images returned from server');
     }
   } catch (error) {
-    console.warn('Server fetch failed, using fallback images:', error);
+    console.warn('Server fetch failed, using fallback images:', error.message);
     imageQueue = getFallbackImages();
   }
 
@@ -181,7 +182,8 @@ function getFallbackImages() {
     'art1', 'art2', 'art3', 'art4', 'art5', 'art6',
     'art7', 'art8', 'art9', 'art10', 'art11', 'art12'
   ];
-  return seeds.map(seed => `https://picsum.photos/seed/${seed}/800/600`);
+  // Use proxy for fallback images too to avoid CORS issues
+  return seeds.map(seed => `/.netlify/functions/proxy-image?url=${encodeURIComponent(`https://picsum.photos/seed/${seed}/800/600`)}`);
 }
 
 function updateLoadingProgress(text) {
@@ -198,7 +200,7 @@ function updateArtworkCount() {
 }
 
 // === ROOM GENERATION ===
-function generateNextRoom() {
+async function generateNextRoom() {
   if (imageQueue.length === 0 || isGenerating) return;
 
   isGenerating = true;
@@ -206,11 +208,11 @@ function generateNextRoom() {
 
   createRoomStructure(roomZ);
 
-  // Add pictures to the room
+  // Add pictures to the room - one unique image per position
   const picsToAdd = Math.min(CONFIG.PICS_PER_ROOM, imageQueue.length);
   for (let i = 0; i < picsToAdd; i++) {
     const imgUrl = imageQueue.shift();
-    addPictureToRoom(roomZ, i, imgUrl);
+    await addPictureToRoom(roomZ, i, imgUrl);
   }
 
   currentRoomIndex++;
@@ -308,32 +310,24 @@ function addGalleryLighting(zPos) {
 
 // === PICTURE FRAMES ===
 async function addPictureToRoom(zPos, indexInRoom, url) {
-  const positions = getPicturePositions(indexInRoom);
-  
-  positions.forEach((pos, i) => {
-    createPictureFrame(pos.position, pos.rotation, url);
-  });
+  const position = getPicturePosition(indexInRoom, zPos);
+  await createPictureFrame(position.position, position.rotation, url);
 }
 
-function getPicturePositions(indexInRoom) {
-  const positions = [];
+function getPicturePosition(indexInRoom, roomZ) {
   const wallOffset = CONFIG.ROOM_WIDTH / 2 - 2;
   const picSpacing = CONFIG.ROOM_DEPTH / CONFIG.PICS_PER_ROOM;
   const startY = CONFIG.ROOM_HEIGHT / 2 + 3;
+  
+  const isLeft = indexInRoom % 2 === 0;
+  const xPos = isLeft ? -wallOffset : wallOffset;
+  const rotY = isLeft ? Math.PI / 2 : -Math.PI / 2;
+  const zPos = (indexInRoom * picSpacing) - (CONFIG.ROOM_DEPTH / 2) + (picSpacing / 2);
 
-  for (let i = 0; i < CONFIG.PICS_PER_ROOM; i++) {
-    const isLeft = i % 2 === 0;
-    const xPos = isLeft ? -wallOffset : wallOffset;
-    const rotY = isLeft ? Math.PI / 2 : -Math.PI / 2;
-    const zPos = (i * picSpacing) - (CONFIG.ROOM_DEPTH / 2) + (picSpacing / 2);
-
-    positions.push({
-      position: new THREE.Vector3(xPos, startY, zPos),
-      rotation: new THREE.Euler(0, rotY, 0)
-    });
-  }
-
-  return positions.slice(0, CONFIG.PICS_PER_ROOM);
+  return {
+    position: new THREE.Vector3(xPos, startY, zPos + roomZ),
+    rotation: new THREE.Euler(0, rotY, 0)
+  };
 }
 
 async function createPictureFrame(position, rotation, url) {
@@ -341,10 +335,28 @@ async function createPictureFrame(position, rotation, url) {
   frameGroup.position.copy(position);
   frameGroup.rotation.copy(rotation);
 
-  const proxyUrl = `/.netlify/functions/proxy-image?url=${encodeURIComponent(url)}`;
-
   try {
-    const texture = await loadTexture(proxyUrl);
+    let texture;
+    
+    // Check if this is a proxy URL (returns JSON) or direct image URL
+    if (url.includes('/.netlify/functions/proxy-image')) {
+      // Fetch the JSON response from proxy
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Proxy returned ${response.status}`);
+      }
+      const data = await response.json();
+      
+      if (data.dataUrl) {
+        // Load texture from base64 data URL
+        texture = await loadTexture(data.dataUrl);
+      } else {
+        throw new Error('No dataUrl in proxy response');
+      }
+    } else {
+      // Direct image URL - use CORS-enabled loader
+      texture = await loadTextureWithCORS(url);
+    }
     
     // Picture geometry
     const aspectRatio = 3 / 4;
@@ -390,7 +402,11 @@ async function createPictureFrame(position, rotation, url) {
     updateArtworkCount();
 
   } catch (err) {
-    console.error('Failed to load picture:', err);
+    console.error('Failed to load picture:', url, err);
+    console.error('Error details:', err.message || err);
+    // Create placeholder artwork instead of failing silently
+    createPlaceholderArtwork(frameGroup, position, rotation);
+    scene.add(frameGroup);
   }
 }
 
@@ -438,9 +454,125 @@ async function loadTexture(url) {
         resolve(texture);
       },
       undefined,
-      reject
+      (err) => {
+        console.error('Texture load error:', url, err);
+        reject(err);
+      }
     );
   });
+}
+
+async function loadTextureWithCORS(url) {
+  return new Promise((resolve, reject) => {
+    const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin('anonymous');
+    loader.load(
+      url,
+      (texture) => {
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.needsUpdate = true;
+        resolve(texture);
+      },
+      undefined,
+      (err) => {
+        console.error('Texture CORS load error:', url, err);
+        reject(err);
+      }
+    );
+  });
+}
+
+function createPlaceholderArtwork(frameGroup, position, rotation) {
+  // Create a colorful procedural artwork as placeholder
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 768;
+  const ctx = canvas.getContext('2d');
+  
+  // Generate abstract art with random colors
+  const hue1 = Math.random() * 360;
+  const hue2 = (hue1 + 180) % 360;
+  
+  const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+  gradient.addColorStop(0, `hsl(${hue1}, 70%, 50%)`);
+  gradient.addColorStop(0.5, `hsl(${hue2}, 60%, 40%)`);
+  gradient.addColorStop(1, `hsl(${hue1}, 80%, 60%)`);
+  
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  // Add some abstract shapes
+  for (let i = 0; i < 20; i++) {
+    ctx.beginPath();
+    ctx.arc(
+      Math.random() * canvas.width,
+      Math.random() * canvas.height,
+      Math.random() * 100 + 20,
+      0,
+      Math.PI * 2
+    );
+    ctx.fillStyle = `hsla(${Math.random() * 360}, 60%, 50%, 0.3)`;
+    ctx.fill();
+  }
+  
+  // Add title text
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+  ctx.font = 'bold 48px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('Abstract Art', canvas.width / 2, canvas.height / 2);
+  ctx.font = '24px Arial';
+  ctx.fillText(`#${Math.floor(Math.random() * 10000)}`, canvas.width / 2, canvas.height / 2 + 40);
+  
+  // Convert canvas to data URL and load as texture
+  const dataUrl = canvas.toDataURL('image/png');
+  
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  
+  frameGroup.position.copy(position);
+  frameGroup.rotation.copy(rotation);
+  
+  // Picture geometry
+  const aspectRatio = 3 / 4;
+  const picHeight = 7;
+  const picWidth = picHeight * aspectRatio;
+  
+  const geometry = new THREE.PlaneGeometry(picWidth, picHeight);
+  const material = new THREE.MeshStandardMaterial({ 
+    map: texture, 
+    side: THREE.DoubleSide,
+    roughness: 0.3
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+
+  // Frame
+  const frameDepth = 0.3;
+  const frameWidth = picWidth + 0.8;
+  const frameHeight = picHeight + 0.8;
+  const frameGeo = createFrameGeometry(frameWidth, frameHeight, frameDepth);
+  const frameMat = new THREE.MeshStandardMaterial({ 
+    color: 0x8B4513,
+    roughness: 0.5,
+    metalness: 0.3
+  });
+  const frame = new THREE.Mesh(frameGeo, frameMat);
+  frame.position.z = -frameDepth / 2;
+  frame.castShadow = true;
+
+  frameGroup.add(mesh);
+  frameGroup.add(frame);
+  scene.add(frameGroup);
+
+  activeTextures.push({ texture, mesh, group: frameGroup });
+
+  if (activeTextures.length > CONFIG.MAX_ACTIVE_TEXTURES) {
+    disposeOldestTexture();
+  }
+
+  updateArtworkCount();
 }
 
 function disposeOldestTexture() {

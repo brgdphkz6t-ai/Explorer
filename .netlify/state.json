@@ -1,0 +1,14 @@
+{
+	"geolocation": {
+		"data": {
+			"country": {
+				"code": "SG",
+				"name": "Singapore"
+			},
+			"timezone": "Asia/Singapore",
+			"latitude": 1.3667,
+			"longitude": 103.8
+		},
+		"timestamp": 1788477947502
+	}
+}
